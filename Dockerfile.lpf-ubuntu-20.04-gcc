@@ -1,0 +1,28 @@
+
+FROM ubuntu:20.04
+
+ARG TIMEZONE=Etc/UTC
+
+# basic tools
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive TZ=$TIMEZONE apt-get -y --no-install-recommends install tzdata wget make libnuma-dev gcc g++ mpich libmpich-dev git openssh-client ca-certificates ninja-build python3 python3-venv python3-pip lcov && python3 -m pip install --upgrade pip && python3 -m pip install gcovr
+
+# folder with all components
+RUN mkdir -p /alp_deployment
+
+# copy datasets directory: the user must create it before running docker build
+COPY datasets /alp_deployment/datasets
+ENV ALP_DATASETS="/alp_deployment/datasets"
+
+# use CMake version 3.13, the minimal one prescribed by ALP, and expose it on PATH
+RUN cd /alp_deployment && mkdir cmake && wget -q -O cmake.tar.gz https://cmake.org/files/v3.13/cmake-3.13.0-Linux-x86_64.tar.gz && tar -xf cmake.tar.gz -C cmake --strip-components 1 && rm cmake.tar.gz
+ENV PATH="/alp_deployment/cmake/bin:${PATH}"
+
+# LPF: download, compile, install and expose via dedicated environment variable
+RUN cd /alp_deployment && git clone -b master --single-branch https://github.com/Algebraic-Programming/LPF.git lpf && mkdir lpf/build_mpich && cd lpf/build_mpich && ../bootstrap.sh --prefix=$(pwd)/install --disable-doc -DLPF_HWLOC=/usr/lib/x86_64-linux-gnu/ && make -j$(nproc) && make -j$(nproc) install
+ENV LPF_PATH="/alp_deployment/lpf/build_mpich/install"
+
+# advanced GitLab CI features (JUnit test report generation) need CMake 3.26 or newer, which is available via a dedicated variable (i.e., no default)
+RUN cd /alp_deployment && mkdir cmake_3.26.4 && wget -q -O cmake_3.26.4.tar.gz https://cmake.org/files/v3.26/cmake-3.26.4-linux-x86_64.tar.gz && tar -xf cmake_3.26.4.tar.gz -C cmake_3.26.4 --strip-components 1 && rm cmake_3.26.4.tar.gz
+ENV CMAKE_RECENT="/alp_deployment/cmake_3.26.4/bin"
+
+WORKDIR /alp_ci

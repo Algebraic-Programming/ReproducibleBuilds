@@ -1,0 +1,58 @@
+
+FROM ubuntu:22.04
+
+ARG TIMEZONE=Etc/UTC
+
+# basic tools
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive TZ=$TIMEZONE apt-get -y --no-install-recommends install tzdata wget make libnuma-dev gcc g++ mpich libmpich-dev git openssh-client ca-certificates ninja-build python3 python3-venv python3-pip lcov && python3 -m pip install --upgrade pip && python3 -m pip install gcovr
+
+# install multiple compiler toolchains, both GCC and Clang
+ENV GCC_VERSIONS="9 10 11 12"
+RUN for ver in $GCC_VERSIONS; do DEBIAN_FRONTEND=noninteractive TZ=$TIMEZONE apt-get -y --no-install-recommends install g++-$ver; done
+ENV CLANG_VERSIONS="11 12 13 14"
+RUN for ver in $CLANG_VERSIONS; do DEBIAN_FRONTEND=noninteractive TZ=$TIMEZONE apt-get -y --no-install-recommends install clang-$ver libomp-${ver}-dev; done
+
+# folder with all components
+RUN mkdir -p /alp_deployment
+
+# copy datasets directory: the user must create it before running docker build
+COPY datasets /alp_deployment/datasets
+ENV ALP_DATASETS="/alp_deployment/datasets"
+
+# use CMake version 3.13, the minimal one prescribed by ALP, and expose it on PATH
+RUN cd /alp_deployment && mkdir cmake && wget -q -O cmake.tar.gz https://cmake.org/files/v3.13/cmake-3.13.0-Linux-x86_64.tar.gz && tar -xf cmake.tar.gz -C cmake --strip-components 1 && rm cmake.tar.gz
+ENV PATH="/alp_deployment/cmake/bin:${PATH}"
+
+# LPF has problems running on Ubuntu 22.04 (see https://github.com/Algebraic-Programming/LPF/issues/6), temporary fixes are available in this branch
+ARG LPF_BRANCH_NAME=6-passing-post-install-for-mpimsg-engine-checks-on-ubuntu-2204
+RUN cd /alp_deployment && git clone -b $LPF_BRANCH_NAME --single-branch https://github.com/Algebraic-Programming/LPF.git lpf
+
+# compile LPF against the various compilers installed above
+RUN cd /alp_deployment/lpf && \
+for ver in $GCC_VERSIONS; do \
+mkdir build_mpich_gcc_${ver}; \
+cd build_mpich_gcc_${ver}; \
+CXX=g++-${ver} CC=gcc-${ver} cmake -DCMAKE_INSTALL_PREFIX=$(pwd)/install -DCMAKE_BUILD_TYPE=Release -DLPFLIB_MAKE_DOC=OFF -DLPFLIB_MAKE_TEST_DOC=OFF -DLPF_ENABLE_TESTS=OFF -DGTEST_AGREE_TO_LICENSE=NO -DLPFLIB_PERFTESTS=OFF -DLPFLIB_CONFIG_NAME=Release -DLPF_HWLOC=/usr/lib/x86_64-linux-gnu/ -DRUN_DEBUG_TESTS=OFF ../; \
+make -j$(nproc); \
+make -j$(nproc) install; \
+cd ..; \
+done
+
+RUN cd /alp_deployment/lpf && \
+for ver in $CLANG_VERSIONS; do \
+mkdir build_mpich_clang_${ver}; \
+cd build_mpich_clang_${ver}; \
+CXX=clang++-${ver} CC=clang-${ver} ../bootstrap.sh --prefix=$(pwd)/install --disable-doc -DLPF_HWLOC=/usr/lib/x86_64-linux-gnu/ -DRUN_DEBUG_TESTS=OFF; \
+make -j$(nproc); \
+make -j$(nproc) install; \
+cd ..; \
+done
+
+# expose the base path for all LPF deployments: a specific deployment path is thus ${LPF_BASE_PATH}/build_<MPI implementation>_<compiler>_<compiler version>, e.g., ${LPF_BASE_PATH}/build_mpich_clang_14
+ENV LPF_BASE_PATH="/alp_deployment/lpf"
+
+# advanced GitLab CI features (JUnit test report generation) need CMake 3.26 or newer, which is available via a dedicated variable (i.e., no default)
+RUN cd /alp_deployment && mkdir cmake_3.26.4 && wget -q -O cmake_3.26.4.tar.gz https://cmake.org/files/v3.26/cmake-3.26.4-linux-x86_64.tar.gz && tar -xf cmake_3.26.4.tar.gz -C cmake_3.26.4 --strip-components 1 && rm cmake_3.26.4.tar.gz
+ENV CMAKE_RECENT="/alp_deployment/cmake_3.26.4/bin"
+
+WORKDIR /alp_ci
