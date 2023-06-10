@@ -82,7 +82,10 @@ docker build -t lpf-ubuntu-20.04-gcc -f Dockerfile.lpf-ubuntu-20.04-gcc .
 
 ## Build and push to a Docker registry
 To build for your own Docker registry (e.g., the CI Docker registry), you need
-to know the Docker registry URL, hereon indicated as `<Docker registry URL>`:
+to know the Docker registry URL, 
+
+
+on indicated as `<Docker registry URL>`:
 
 1. first login into the registry, if you have not done so yet
     ```bash
@@ -91,7 +94,7 @@ to know the Docker registry URL, hereon indicated as `<Docker registry URL>`:
 2. then you should build the image with the proper name, matching that of the
    registry (e.g., for GitLab
    `<Docker registry URL>/<group name>/<project name>/` --
-   see GitLab documentatio
+   see GitLab documentation
    [here](https://docs.gitlab.com/ee/user/packages/container_registry/build_and_push_images.html));
    e.g.:
     ```bash
@@ -110,13 +113,51 @@ dedicated environment variables (see the `ENV` directives in the `Dockerfile`s).
 Note: processes inside the container **run as root**, in order to be able to
 install custom dependencies easily. No limited user privilege is enforced.
 
+# Local Usage
+In addition to the CI, the images can be used to conveniently build ALP locally
+and test it. In a typical development scenario, the user already has a directory
+`<ALP code path>` with ALP code, and wants to build and test it inside a
+container. To this aim, she can create a container out of an image and mount
+`<ALP code path>` as a
+[bind mount](https://docs.docker.com/storage/bind-mounts/).
+Inside the container, she can easily access `<ALP code path>` as an internal
+directory and build from there.
+Furthermore, any modifications made in `<ALP code path>` from the host machine
+(e.g., with her usual editor/IDE) are immediately visible inside the container.
+An example command is
+
+```bash
+docker run -it --rm -v <ALP code path>:/alp_code:ro lpf-ubuntu-20.04-gcc
+```
+
+where:
+
+* `-it` redirects input and output to the current console (for interactive usage)
+* `--rm` automatically removes the container once terminated (for temporary usage)
+* `-v <ALP code path>:/alp_code:ro` mounts `<ALP code path>` (path in the host)
+  into the path `/alp_code` within the container, with `ro` (read-only) permission
+  (i.e., the user cannot modify the content of `/alp_code` from the container, but
+  can work as usual within the host)
+* `lpf-ubuntu-20.04-gcc` is the image name
+
+Once run, she can directly access the ALP code from `/alp_code`, for example as:
+
+```bash
+pwd # (we are by default in /alp_ci)
+mkdir build
+cd build
+/alp_code/bootstrap.sh ...
+make ...
+```
+
 # Other images
 The file `Dockerfile.lpf-ubuntu-22.04-gcc-clang` builds a Docker image from
 Ubuntu 22.04, similarly to what described above. However, Ubuntu 22.04 offers
 more compiler versions for both GCC and Clang, which are stored in this image.
 The offered versions are stored in the environment variables `GCC_VERSIONS` and
-`CLANG_VERSIONS`, respectively. All related LPF deployments are built from these
-compilers, under the following naming scheme:
+`CLANG_VERSIONS`, respectively.
+All related LPF deployments are built from these compilers, under the following
+naming scheme:
 
 - `${LPF_BASE_PATH}/build_mpich_gcc_9/install` deployment for LPF built with MPICH and GCC 9
 - `${LPF_BASE_PATH}/build_mpich_gcc_10/install` deployment for LPF built with MPICH and GCC 10
